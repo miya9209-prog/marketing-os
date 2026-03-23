@@ -8,8 +8,6 @@ from datetime import datetime
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 
-import cv2
-import numpy as np
 import streamlit as st
 from openai import OpenAI
 
@@ -264,6 +262,17 @@ def make_work_filename() -> str:
 
 
 def extract_video_frames(asset: MediaAsset, max_frames: int = 3) -> List[MediaAsset]:
+    """Best-effort video frame extraction.
+
+    Streamlit Cloud environments sometimes fail to install OpenCV depending on the
+    Python runtime. To keep the app stable, this function degrades gracefully and
+    simply skips frame extraction when OpenCV is unavailable.
+    """
+    try:
+        import cv2  # type: ignore
+    except Exception:
+        return []
+
     suffix = os.path.splitext(asset.name)[1] or ".mp4"
     frames: List[MediaAsset] = []
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -273,8 +282,14 @@ def extract_video_frames(asset: MediaAsset, max_frames: int = 3) -> List[MediaAs
         cap = cv2.VideoCapture(tmp_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
         if total_frames <= 0:
+            cap.release()
             return []
-        positions = np.linspace(0.15, 0.85, num=max_frames)
+
+        if max_frames <= 1:
+            positions = [0.5]
+        else:
+            positions = [0.15 + (0.70 * i / (max_frames - 1)) for i in range(max_frames)]
+
         for idx, pos in enumerate(positions, start=1):
             frame_no = min(max(int(total_frames * float(pos)), 0), max(total_frames - 1, 0))
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
