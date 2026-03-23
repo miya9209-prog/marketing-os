@@ -1,47 +1,78 @@
 
 import streamlit as st
-import json, re, os, base64, mimetypes
+import json, re, os
 from datetime import datetime
 from openai import OpenAI
 
-st.set_page_config(page_title="MISHARP 광고문구 자동생성기", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="MISHARP 광고문구 자동생성기",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# ---------- Styles ----------
 st.markdown("""
 <style>
-.block-container {
-  max-width: 1240px;
-  padding-top: 1.0rem;
-  padding-bottom: 2.5rem;
+html, body, [class*="css"] {
+  font-family: "Pretendard","Noto Sans KR",sans-serif;
+}
+.stApp {
+  background: linear-gradient(180deg,#020617 0%, #030816 100%);
 }
 [data-testid="stSidebar"], [data-testid="stSidebarNav"], [data-testid="collapsedControl"]{
   display:none !important;
 }
+.block-container {
+  max-width: 1240px;
+  padding-top: 2.4rem !important;   /* 상단 잘림 방지 */
+  padding-bottom: 2.5rem;
+}
 .misharp-header {
   background: #f5f2f1;
   border-radius: 26px;
-  padding: 28px 30px 24px 30px;
+  padding: 30px 32px 26px 32px;
   color: #251a2e;
   box-shadow: 0 8px 28px rgba(0,0,0,.18);
-  margin-bottom: 12px;
+  margin-top: 0.4rem;              /* 헤더 위 여백 추가 */
+  margin-bottom: 14px;
 }
-.misharp-header h1{ margin:0; font-size:2.4rem; font-weight:900; }
-.misharp-header p{ margin:10px 0 0 0; color:#6b4f45; }
-
-.stButton > button, .stDownloadButton > button, a[data-testid="stLinkButton"]{
-  width: 100%; min-height: 52px; border-radius: 16px !important;
+.misharp-header h1{
+  margin:0;
+  font-size:2.45rem;
+  font-weight:900;
+  line-height:1.12;
+  letter-spacing:-0.03em;
+}
+.misharp-header p{
+  margin:10px 0 0 0;
+  color:#6b4f45;
+  font-size:1.02rem;
+}
+.stButton > button,
+.stDownloadButton > button,
+a[data-testid="stLinkButton"]{
+  width: 100%;
+  min-height: 52px;
+  border-radius: 16px !important;
   border: 1px solid #314156 !important;
-  background: rgba(10,18,32,.72) !important; color:#fff !important; font-weight:800 !important;
+  background: rgba(10,18,32,.72) !important;
+  color:#fff !important;
+  font-weight:800 !important;
 }
-hr.misharp-divider{ border:none; border-top:1px solid rgba(52,69,91,.7); margin:18px 0; }
+hr.misharp-divider{
+  border:none;
+  border-top:1px solid rgba(52,69,91,.7);
+  margin:18px 0;
+}
+div[data-testid="stTextInputRoot"] input,
+div[data-testid="stTextArea"] textarea{
+  border-radius: 14px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- Helpers ----------
 def reset_all():
-    keep = {"uploader_nonce"}
     for k in list(st.session_state.keys()):
-        if k not in keep:
+        if k != "uploader_nonce":
             del st.session_state[k]
     st.session_state.uploader_nonce = st.session_state.get("uploader_nonce", 0) + 1
 
@@ -49,7 +80,8 @@ def sanitize_filename(value: str) -> str:
     value = (value or "").strip()
     value = re.sub(r"https?://", "", value)
     value = re.sub(r"[^0-9A-Za-z가-힣._-]+", "_", value)
-    return (value[:40] or "work")
+    value = value.strip("._-")
+    return value[:40] or "work"
 
 def current_payload():
     return {
@@ -60,18 +92,25 @@ def current_payload():
 
 def build_prompt(data):
     return f"""당신은 최고의 온라인마케터이자 카피라이터입니다.
+
 상품내용:
 {data.get('product_content','')}
+
 이벤트:
 {data.get('event_content','')}
+
 URL:
 {data.get('product_url','')}
+
 채널별로 결과를 구분해서 작성하세요.
 """
 
 def call_gpt(prompt):
     client = OpenAI()
-    res = client.responses.create(model=os.getenv("OPENAI_MODEL","gpt-4.1-mini"), input=prompt)
+    res = client.responses.create(
+        model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        input=prompt
+    )
     return res.output_text
 
 def truncate_sms(text):
@@ -80,7 +119,6 @@ def truncate_sms(text):
         text = prefix + text
     return text[:55]
 
-# ---------- Header ----------
 st.markdown("""
 <div class="misharp-header">
   <h1>MISHARP 광고문구 자동생성기</h1>
@@ -88,7 +126,6 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ---------- Buttons (aligned) ----------
 btn_cols = st.columns(5, gap="small")
 
 with btn_cols[0]:
@@ -101,8 +138,13 @@ with btn_cols[1]:
     product_url = st.session_state.get("product_url") or ""
     file_base = sanitize_filename(product_content[:24] if product_content else product_url)
     save_name = f"misharp_marketing_os_{file_base}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    st.download_button("작업 저장", data=json.dumps(current_payload(), ensure_ascii=False, indent=2),
-                       file_name=save_name, mime="application/json", use_container_width=True)
+    st.download_button(
+        "작업 저장",
+        data=json.dumps(current_payload(), ensure_ascii=False, indent=2),
+        file_name=save_name,
+        mime="application/json",
+        use_container_width=True
+    )
 
 with btn_cols[2]:
     with st.popover("작업 불러오기", use_container_width=True):
@@ -122,20 +164,19 @@ with btn_cols[4]:
 
 st.markdown("<hr class='misharp-divider'>", unsafe_allow_html=True)
 
-# ---------- Inputs ----------
 c1, c2 = st.columns(2)
 with c1:
     st.markdown("### 입력 정보")
     st.text_input("상품 URL", key="product_url")
     st.text_area("상품내용", key="product_content", height=220)
     st.text_area("이벤트 주요내용", key="event_content", height=120)
+
 with c2:
     st.markdown("### 이미지 / 동영상 등록")
     st.file_uploader("파일 업로드", accept_multiple_files=True)
 
 st.markdown("<hr class='misharp-divider'>", unsafe_allow_html=True)
 
-# ---------- Generate ----------
 if st.button("문구 생성", use_container_width=True):
     payload = current_payload()
     if not (payload["product_url"] or payload["product_content"] or payload["event_content"]):
