@@ -206,7 +206,7 @@ def truncate_sms(text):
 st.markdown("""
 <div class="misharp-header">
   <h1>MISHARP 광고문구 자동생성기</h1>
-  <p>온라인 셀러를 위한 SNS 매체별 최적화 광고문구 자동 생성기</p>
+  <p>온라인 셀러를 위한 SNS 매체별 최적화 광고문구 자동 생성기[문자발송,앱푸시,숏폼 시놉,인스타,유튜브,틱톡,카카오스토리 피드</p>
 </div>
 """, unsafe_allow_html=True)
 
