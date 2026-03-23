@@ -1,10 +1,15 @@
 import base64
-import io
 import json
 import os
+import re
+import tempfile
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from datetime import datetime
+from typing import Any, Dict, List
+from urllib.parse import urlparse
 
+import cv2
+import numpy as np
 import streamlit as st
 from openai import OpenAI
 
@@ -14,45 +19,102 @@ st.set_page_config(
     layout="wide",
 )
 
-COPYRIGHT = "copyright MISHARP COMPANY by MIYAWA. 2026. All rights reservde."
+COPYRIGHT = "copyright MISHARP COMPANY by MIYAWA. 2026. All rights reserved."
 SUBTITLE = "온라인 셀러를 위한 SNS 매체별 최적화 광고문구 자동 생성기"
 
 CHANNEL_LABELS = {
     "sms": "SMS 문자",
     "app_push": "앱푸시",
+    "video_script": "동영상 원고",
     "instagram": "인스타 릴스 피드",
     "tiktok": "틱톡 피드",
-    "youtube": "유튜브 숏츠 피드",
+    "youtube": "유튜브 쇼츠 피드",
+    "kakaostyle": "카카오스타일",
     "review": "REVIEW",
 }
+
+PRIVACY_POLICY_TEXT = """
+제1조 수집하는 정보
+본 서비스는 사용자가 입력한 상품 URL, 상품 설명, 이벤트 내용, 업로드한 이미지·동영상 파일, 생성 결과와 같은 작업 데이터를 처리할 수 있습니다. 결제정보나 주민등록번호와 같은 민감한 개인정보를 의도적으로 수집하지 않습니다.
+
+제2조 이용 목적
+수집된 정보는 광고문구 생성, 작업 저장/불러오기, 결과 다운로드, 서비스 품질 개선 및 오류 대응을 위해 사용됩니다.
+
+제3조 보관 및 파기
+작업 데이터는 사용자가 직접 저장한 파일 형태로 우선 관리되며, 서비스 내부에 별도로 장기 보관하지 않는 것을 원칙으로 합니다. 임시 처리 과정에서 생성된 데이터는 작업 완료 후 즉시 또는 합리적인 기간 내 파기됩니다.
+
+제4조 제3자 제공
+법령상 의무가 있는 경우를 제외하고, 사용자의 데이터를 외부에 판매하거나 임의 제공하지 않습니다. 다만 AI 생성 기능 수행을 위해 필요한 범위에서 관련 API 서비스로 입력 데이터가 전달될 수 있습니다.
+
+제5조 이용자 권리
+이용자는 자신의 입력 내용을 직접 수정, 삭제, 초기화할 수 있으며, 저장된 파일은 본인 컴퓨터에서 자유롭게 관리할 수 있습니다.
+
+제6조 보호 조치
+서비스는 접근 권한 관리, 비밀정보 분리, 안전한 전송 환경 등 합리적인 보호 조치를 적용하기 위해 노력합니다.
+
+제7조 문의
+운영정책 또는 개인정보 관련 문의는 서비스 운영자에게 전달할 수 있으며, 정책은 필요 시 업데이트될 수 있습니다.
+""".strip()
+
+TERMS_TEXT = """
+제1조 목적
+본 약관은 미샵 광고문구 자동생성기 서비스의 이용 조건과 운영 기준을 정하는 것을 목적으로 합니다.
+
+제2조 서비스 내용
+서비스는 사용자가 입력한 상품/이벤트 정보를 바탕으로 광고문구, 리뷰, 피드 원고, 동영상 원고 등을 생성하는 기능을 제공합니다.
+
+제3조 이용자 책임
+이용자는 입력하는 정보에 대한 권리를 보유해야 하며, 타인의 권리를 침해하거나 허위·불법 정보를 입력해서는 안 됩니다. 생성 결과의 최종 검토와 실제 사용 책임은 이용자에게 있습니다.
+
+제4조 금지 행위
+불법 광고, 타인 사칭, 저작권 침해, 시스템 악용, 비정상적 트래픽 유발 등의 행위는 금지됩니다.
+
+제5조 서비스 변경
+운영자는 기능 개선, 안정화, 오류 수정 등을 위해 서비스 구성이나 제공 방식을 변경할 수 있습니다.
+
+제6조 면책
+본 서비스는 생성형 AI 특성상 결과의 완전성·정확성을 절대적으로 보장하지 않으며, 실제 광고 집행 전 이용자의 검토가 필요합니다. 운영자는 이용자의 최종 사용 결과에 대해 직접적인 책임을 부담하지 않습니다.
+
+제7조 지식재산권
+서비스 UI, 구조, 운영자가 제공한 고유한 리소스에 대한 권리는 운영자에게 있습니다. 이용자가 입력한 데이터와 생성 결과의 활용은 관련 법령과 개별 권리관계를 따릅니다.
+
+제8조 준거
+본 약관은 대한민국 법령을 기준으로 해석합니다.
+""".strip()
+
+
+@dataclass
+class MediaAsset:
+    kind: str
+    name: str
+    mime: str
+    data: bytes
 
 
 @dataclass
 class GenerationInput:
     product_url: str
-    source_text: str
+    product_text: str
+    event_text: str
     selected_channels: List[str]
     sms_mode: str
-    uploaded_images: List[Any]
+    media_assets: List[MediaAsset]
 
 
-# -----------------------------
-# Styling
-# -----------------------------
 def inject_css() -> None:
     st.markdown(
         """
         <style>
         .block-container {
-            padding-top: 1.8rem;
-            padding-bottom: 2rem;
+            padding-top: 3rem;
+            padding-bottom: 2.5rem;
             max-width: 1320px;
         }
         .misharp-hero {
             border: 1px solid rgba(180, 153, 166, 0.35);
             background: linear-gradient(180deg, #fffafb 0%, #fff 100%);
             border-radius: 22px;
-            padding: 26px 28px 20px 28px;
+            padding: 30px 30px 24px 30px;
             box-shadow: 0 14px 40px rgba(93, 63, 76, 0.08);
             margin-bottom: 18px;
         }
@@ -95,10 +157,10 @@ def inject_css() -> None:
             font-size: 0.88rem;
             border-top: 1px solid rgba(180, 153, 166, 0.22);
         }
-        .stButton > button, .stDownloadButton > button {
+        .stButton > button, .stDownloadButton > button, a[data-testid="stLinkButton"] {
             border-radius: 12px !important;
-            height: 2.8rem;
-            font-weight: 700;
+            min-height: 2.8rem !important;
+            font-weight: 700 !important;
         }
         .pill {
             display:inline-block;
@@ -111,28 +173,37 @@ def inject_css() -> None:
             margin-right:8px;
             margin-bottom:8px;
         }
+        .policy-box {
+            border: 1px solid rgba(180, 153, 166, 0.25);
+            background:#fffafb;
+            border-radius:16px;
+            padding:14px 16px;
+            min-height: 240px;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-# -----------------------------
-# Session helpers
-# -----------------------------
 def default_state() -> Dict[str, Any]:
     return {
         "product_url": "",
-        "source_text": "",
+        "product_text": "",
+        "event_text": "",
         "sms_mode": "장문",
         "channel_sms": True,
         "channel_app_push": True,
+        "channel_video_script": True,
         "channel_instagram": True,
         "channel_tiktok": False,
         "channel_youtube": False,
+        "channel_kakaostyle": False,
         "channel_review": False,
         "generated_output": "",
         "last_payload": None,
+        "media_uploader_nonce": 0,
+        "workload_uploader_nonce": 0,
     }
 
 
@@ -143,13 +214,14 @@ def ensure_state() -> None:
 
 
 def reset_state() -> None:
+    media_nonce = int(st.session_state.get("media_uploader_nonce", 0)) + 1
+    workload_nonce = int(st.session_state.get("workload_uploader_nonce", 0)) + 1
     for key, value in default_state().items():
         st.session_state[key] = value
+    st.session_state["media_uploader_nonce"] = media_nonce
+    st.session_state["workload_uploader_nonce"] = workload_nonce
 
 
-# -----------------------------
-# OpenAI helpers
-# -----------------------------
 def get_client() -> OpenAI:
     api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
     if not api_key:
@@ -157,10 +229,76 @@ def get_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def file_to_data_url(uploaded_file: Any) -> str:
-    mime = uploaded_file.type or "image/png"
-    encoded = base64.b64encode(uploaded_file.getvalue()).decode("utf-8")
+def file_to_data_url(mime: str, data: bytes) -> str:
+    encoded = base64.b64encode(data).decode("utf-8")
     return f"data:{mime};base64,{encoded}"
+
+
+def sanitize_filename(value: str) -> str:
+    value = re.sub(r"\s+", "_", value.strip())
+    value = re.sub(r"[^0-9A-Za-z가-힣._-]", "", value)
+    value = re.sub(r"_+", "_", value)
+    return value[:40].strip("._-") or "work"
+
+
+def guess_product_label() -> str:
+    for raw in [st.session_state.product_text, st.session_state.event_text]:
+        for line in raw.splitlines():
+            cleaned = line.strip()
+            if cleaned:
+                return sanitize_filename(cleaned[:40])
+    url = st.session_state.product_url.strip()
+    if url:
+        parsed = urlparse(url)
+        host = parsed.netloc.replace("www.", "")
+        path = parsed.path.strip("/").split("/")[-1] if parsed.path else ""
+        candidate = "_".join([x for x in [host, path] if x])
+        if candidate:
+            return sanitize_filename(candidate)
+    return "work"
+
+
+def make_work_filename() -> str:
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"misharp_marketing_os_{guess_product_label()}_{stamp}.json"
+
+
+def extract_video_frames(asset: MediaAsset, max_frames: int = 3) -> List[MediaAsset]:
+    suffix = os.path.splitext(asset.name)[1] or ".mp4"
+    frames: List[MediaAsset] = []
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(asset.data)
+        tmp_path = tmp.name
+    try:
+        cap = cv2.VideoCapture(tmp_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total_frames <= 0:
+            return []
+        positions = np.linspace(0.15, 0.85, num=max_frames)
+        for idx, pos in enumerate(positions, start=1):
+            frame_no = min(max(int(total_frames * float(pos)), 0), max(total_frames - 1, 0))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+            ok, buffer = cv2.imencode(".jpg", frame)
+            if not ok:
+                continue
+            frames.append(
+                MediaAsset(
+                    kind="image",
+                    name=f"{os.path.splitext(asset.name)[0]}_frame{idx}.jpg",
+                    mime="image/jpeg",
+                    data=buffer.tobytes(),
+                )
+            )
+        cap.release()
+        return frames
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
 
 def build_analysis_context(data: GenerationInput) -> str:
@@ -171,8 +309,12 @@ def build_analysis_context(data: GenerationInput) -> str:
 
 [사용자 입력]
 상품 URL: {data.product_url or '(없음)'}
-상품/이벤트 주요 내용:
-{data.source_text or '(없음)'}
+
+상품내용:
+{data.product_text or '(없음)'}
+
+이벤트 주요내용:
+{data.event_text or '(없음)'}
 
 선택 채널: {selected or '(없음)'}
 SMS 모드: {data.sms_mode}
@@ -182,6 +324,8 @@ SMS 모드: {data.sms_mode}
 2. 입력이 부족하면 과장하지 말고 확인 가능한 범위에서만 작성한다.
 3. 모든 결과는 한국어로 작성한다.
 4. 미샵 4050 여성 고객 톤을 유지한다.
+5. 상품내용과 이벤트 주요내용은 분리해서 해석하되, 실제 출력에서는 자연스럽게 통합한다.
+6. 동영상이 업로드된 경우 대표 프레임 이미지를 참고해 분위기, 핏, 소재감, 활용 장면을 보완 추론하되 과장하지 않는다.
 """.strip()
 
 
@@ -190,12 +334,13 @@ def channel_prompt_sms(mode: str) -> str:
         return """
 [SNS 채널: SMS 문자 - 단문]
 - 3가지 시안 작성
-- 한글 56자 이내
-- 반드시 '(광고)미샵♥'로 시작
+- 각 문구는 반드시 정확히 55자 이내
+- 반드시 첫 문구를 '(광고)미샵♥'로 시작
+- '(광고)'의 괄호를 절대 삭제하지 말 것
+- '♥' 다음에는 띄어쓰기 없이 바로 본문을 이어서 작성
 - 반드시 문구 끝에 '▶' 포함
-- 시작문구와 끝기호 포함 총 56자 이내
-- 후킹성, 신선함, 긴박감은 넣되 과장 금지
-- 링크를 넣는 경우에도 56자 이내를 지킬 것
+- 시작문구와 끝기호를 모두 포함해 55자 이내
+- 짧아도 좋으니 절대 55자를 넘기지 말 것
 - 결과 형식:
 [SMS 단문 1]
 ...
@@ -264,67 +409,43 @@ def channel_prompt_app_push() -> str:
 1) 타입1: 24시간 MD추천 10%할인
 - 헤드라인 30자 이내 5가지
 - 광고문구 3종
-- 형식:
-[앱푸시 타입1]
-헤드라인 후보:
-1. ...
-2. ...
-3. ...
-4. ...
-5. ...
-
-광고문구 1:
-광고)24시간 MD추천 10%할인 [상품명]
-(푸시 문구 – 한글 50자 이내)
-수신거부설정: 알림함-설정버튼
-
-광고문구 2:
-...
-광고문구 3:
-...
 
 2) 타입2: 주말한정 MD추천 10%할인
 - 헤드라인 30자 이내 5가지
 - 광고문구 3종
-- 형식:
-[앱푸시 타입2]
-헤드라인 후보:
-1. ...
-2. ...
-3. ...
-4. ...
-5. ...
-
-광고문구 1:
-광고)주말한정 MD추천 10%할인 [상품명]
-(푸시 문구 – 한글 50자 이내)
-수신거부설정: 알림함-설정버튼
-
-광고문구 2:
-...
-광고문구 3:
-...
 
 3) 타입3: 이벤트 입력 기반
 - 헤드라인 30자 이내 5가지
 - 광고문구 3종
-- 형식:
-[앱푸시 타입3]
-헤드라인 후보:
-1. ...
-2. ...
-3. ...
-4. ...
-5. ...
+- 이벤트가 없으면 상품 특장점 기반으로 자연스럽게 대체
 
-광고문구 1:
-광고) [이벤트명] + 광고문구 + 수신거부설정: 알림함-설정버튼
-- 총 100자 이내
+각 타입의 광고문구 형식에는 반드시 수신거부설정: 알림함-설정버튼 포함
+""".strip()
 
-광고문구 2:
-...
-광고문구 3:
-...
+
+def channel_prompt_video_script() -> str:
+    return """
+[SNS 채널: 동영상 원고]
+당신은 최고의 온라인마케터이자 박웅현, 정철, 최인아와 같은 최고의 카피라이터입니다.
+다음 프로젝트 지침대로 작성해주세요.
+
+[프로젝트 목적]
+20~30초 길이, 인스타 릴스, 유튜브 쇼츠용 동영상 원고 카피 작성
+대한민국 4050 여성 타겟을 겨냥해
+'합리적 소비', '스스로 납득할 수 있는 선택'을 유도하는
+이성적 + 논리적 + 생활밀착형 브랜드 소구 전략을 사용한다.
+"패션 쇼핑호스트"처럼 친근하고 직접 말 걸듯 제안하는 톤을 유지한다.
+말투 : 친근한 쇼핑호스트 및 노련한 옷가게 사장언니의 ~해요 체로.
+
+[프롬프트]
+1. A/B 2타입으로 작성
+2. 각 타입은 짧은 10줄로 구성, 1줄은 20자 내외
+3. 임팩트 있는 광고 카피라이팅
+4. 첫줄은 후킹성 헤드라인(stick 요소 강하게)이고, 별도로 헤드라인 후보 5개 제안
+5. TPO, pain point에 기반해 "~ 분들을 위한 **" 형태를 적극 활용
+6. 상단에서는 실생활 공감 pain point를 제시하고, 진행될수록 상품 USP와 연결하여 상품을 어필
+7. 여성들이 많이 쓰는 대중적인 의성어·의태어를 자연스럽게 활용
+8. 마지막줄은 공감유도 CTA 문구
 """.strip()
 
 
@@ -378,6 +499,21 @@ def channel_prompt_youtube() -> str:
 """.strip()
 
 
+def channel_prompt_kakaostyle() -> str:
+    return """
+[SNS 채널: 카카오스타일]
+프롬프트
+카카오스타일 미샵계정 피드 원고 작성
+- 최상단: 해당 상품 홍보를 위한 후킹성 헤드라인
+- 본내용: 상품명 적고, 한줄 내려서 상품 상세설명 150자 이내 뉴스형식으로 요약
+- 본 내용 하단 "상품 바로가기 ▼" 넣기
+- 한 줄 띄우고 "일상도 스타일도 미샵처럼, 심플하게! MISHARP" 넣기
+- 그 아래 해당 상품 관련 해시태그 30개 삽입
+- 해시태그에는 반드시 #미샵 #여성의류쇼핑몰 #중년여성패션 #ootd #데일리룩 #출근룩 포함
+- 계절/시기 키워드 2~3개를 상황에 맞게 포함
+""".strip()
+
+
 def channel_prompt_review() -> str:
     return """
 [SNS 채널: REVIEW]
@@ -405,12 +541,16 @@ def compose_master_prompt(data: GenerationInput) -> str:
             prompts.append(channel_prompt_sms(data.sms_mode))
         elif channel == "app_push":
             prompts.append(channel_prompt_app_push())
+        elif channel == "video_script":
+            prompts.append(channel_prompt_video_script())
         elif channel == "instagram":
             prompts.append(channel_prompt_instagram())
         elif channel == "tiktok":
             prompts.append(channel_prompt_tiktok())
         elif channel == "youtube":
             prompts.append(channel_prompt_youtube())
+        elif channel == "kakaostyle":
+            prompts.append(channel_prompt_kakaostyle())
         elif channel == "review":
             prompts.append(channel_prompt_review())
 
@@ -429,78 +569,110 @@ def compose_master_prompt(data: GenerationInput) -> str:
     return "\n\n".join(prompts)
 
 
+def enforce_sms_short_constraints(text: str) -> str:
+    pattern = re.compile(r"(\[SMS 단문 \d\]\n)(.*?)(?=\n\[SMS 단문 \d\]|\n=+|\Z)", re.DOTALL)
+
+    def normalize_line(line: str) -> str:
+        line = " ".join(line.strip().split())
+        prefix = "(광고)미샵♥"
+        if line.startswith("(광고)미샵") and not line.startswith(prefix):
+            body = line.replace("(광고)미샵", "", 1).lstrip(" ♥")
+            line = prefix + body
+        elif not line.startswith(prefix):
+            line = prefix + re.sub(r"^\(?광고\)?\s*미샵\s*♥?\s*", "", line)
+        line = line.replace(prefix + " ", prefix)
+        if not line.endswith("▶"):
+            line = line.rstrip("▶ ") + "▶"
+        if len(line) > 55:
+            core = line[:-1]
+            core = core[:54]
+            line = core.rstrip() + "▶"
+        if len(line) > 55:
+            line = line[:55]
+            if not line.endswith("▶"):
+                line = line[:-1] + "▶"
+        return line
+
+    def repl(match: re.Match) -> str:
+        header = match.group(1)
+        body = match.group(2).strip().splitlines()[0] if match.group(2).strip() else ""
+        return header + normalize_line(body) + "\n"
+
+    return pattern.sub(repl, text)
+
+
 def generate_marketing_copy(data: GenerationInput) -> str:
     client = get_client()
+    content: List[Dict[str, Any]] = [{"type": "input_text", "text": compose_master_prompt(data)}]
 
-    content: List[Dict[str, Any]] = [
-        {
-            "type": "input_text",
-            "text": compose_master_prompt(data),
-        }
-    ]
-
-    for image in data.uploaded_images:
-        content.append(
-            {
+    for asset in data.media_assets:
+        if asset.kind == "image":
+            content.append({
                 "type": "input_image",
-                "image_url": file_to_data_url(image),
+                "image_url": file_to_data_url(asset.mime, asset.data),
                 "detail": "auto",
-            }
-        )
+            })
+        elif asset.kind == "video":
+            for frame in extract_video_frames(asset):
+                content.append({
+                    "type": "input_image",
+                    "image_url": file_to_data_url(frame.mime, frame.data),
+                    "detail": "auto",
+                })
 
     response = client.responses.create(
         model="gpt-5",
-        input=[
-            {
-                "role": "user",
-                "content": content,
-            }
-        ],
+        input=[{"role": "user", "content": content}],
     )
-    return response.output_text.strip()
+    output = response.output_text.strip()
+    if data.sms_mode == "단문" and "sms" in data.selected_channels:
+        output = enforce_sms_short_constraints(output)
+    return output
 
 
-# -----------------------------
-# UI helpers
-# -----------------------------
 def selected_channels_from_state() -> List[str]:
     selected: List[str] = []
-    if st.session_state.channel_sms:
-        selected.append("sms")
-    if st.session_state.channel_app_push:
-        selected.append("app_push")
-    if st.session_state.channel_instagram:
-        selected.append("instagram")
-    if st.session_state.channel_tiktok:
-        selected.append("tiktok")
-    if st.session_state.channel_youtube:
-        selected.append("youtube")
-    if st.session_state.channel_review:
-        selected.append("review")
+    ordered_keys = [
+        ("channel_sms", "sms"),
+        ("channel_app_push", "app_push"),
+        ("channel_video_script", "video_script"),
+        ("channel_instagram", "instagram"),
+        ("channel_tiktok", "tiktok"),
+        ("channel_youtube", "youtube"),
+        ("channel_kakaostyle", "kakaostyle"),
+        ("channel_review", "review"),
+    ]
+    for state_key, channel_key in ordered_keys:
+        if st.session_state.get(state_key):
+            selected.append(channel_key)
     return selected
 
 
-def make_payload(uploaded_images: List[Any]) -> Dict[str, Any]:
+def make_payload(media_assets: List[MediaAsset]) -> Dict[str, Any]:
     return {
         "product_url": st.session_state.product_url,
-        "source_text": st.session_state.source_text,
+        "product_text": st.session_state.product_text,
+        "event_text": st.session_state.event_text,
         "sms_mode": st.session_state.sms_mode,
         "channels": selected_channels_from_state(),
-        "image_names": [img.name for img in uploaded_images],
+        "media_names": [asset.name for asset in media_assets],
     }
 
 
 def restore_payload(payload: Dict[str, Any]) -> None:
     st.session_state.product_url = payload.get("product_url", "")
-    st.session_state.source_text = payload.get("source_text", "")
+    st.session_state.product_text = payload.get("product_text", "")
+    st.session_state.event_text = payload.get("event_text", "")
     st.session_state.sms_mode = payload.get("sms_mode", "장문")
 
     channels = set(payload.get("channels", []))
     st.session_state.channel_sms = "sms" in channels
     st.session_state.channel_app_push = "app_push" in channels
+    st.session_state.channel_video_script = "video_script" in channels
     st.session_state.channel_instagram = "instagram" in channels
     st.session_state.channel_tiktok = "tiktok" in channels
     st.session_state.channel_youtube = "youtube" in channels
+    st.session_state.channel_kakaostyle = "kakaostyle" in channels
     st.session_state.channel_review = "review" in channels
 
 
@@ -517,27 +689,32 @@ def render_header() -> None:
 
 
 def render_controls() -> None:
-    c1, c2, c3, c4 = st.columns([1.15, 1.1, 0.8, 0.95])
+    c1, c2, c3, c4, c5 = st.columns(5)
 
     with c1:
-        saved_data = json.dumps(st.session_state.last_payload or default_state(), ensure_ascii=False, indent=2)
+        if st.button("초기화", use_container_width=True):
+            reset_state()
+            st.success("입력값과 생성 결과를 초기화했습니다.")
+
+    with c2:
+        saved_data = json.dumps(st.session_state.last_payload or make_payload([]), ensure_ascii=False, indent=2)
         st.download_button(
-            "현재 작업 저장",
+            "작업 저장",
             data=saved_data.encode("utf-8"),
-            file_name="misharp_marketing_os_work.json",
+            file_name=make_work_filename(),
             mime="application/json",
             use_container_width=True,
         )
 
-    with c2:
-        uploaded_json = st.file_uploader(
-            "기존 작업 불러오기",
-            type=["json"],
-            label_visibility="collapsed",
-            key="workload_json",
-        )
-        if uploaded_json is not None:
-            if st.button("불러오기", use_container_width=True):
+    with c3:
+        with st.popover("작업 불러오기", use_container_width=True):
+            uploaded_json = st.file_uploader(
+                "작업 불러오기",
+                type=["json"],
+                key=f"workload_json_{st.session_state.workload_uploader_nonce}",
+                help="작업 저장으로 내려받은 JSON 파일을 선택하세요.",
+            )
+            if uploaded_json is not None and st.button("불러오기 실행", use_container_width=True):
                 try:
                     payload = json.load(uploaded_json)
                     restore_payload(payload)
@@ -546,16 +723,25 @@ def render_controls() -> None:
                 except Exception as exc:
                     st.error(f"불러오기에 실패했습니다: {exc}")
 
-    with c3:
-        if st.button("초기화", use_container_width=True):
-            reset_state()
-            st.success("입력값과 생성 결과를 초기화했습니다.")
-
     with c4:
-        st.link_button("URL 단축 바로가기", "https://shor.kr/", use_container_width=True)
+        st.link_button("이미지추출", "https://misharp-image-crop-v1.streamlit.app/", use_container_width=True)
+
+    with c5:
+        st.link_button("URL 단축", "https://shor.kr/", use_container_width=True)
+
+    st.caption("웹앱 특성상 사용자의 PC 다운로드 폴더 안에 새 폴더를 자동 생성해 저장하는 기능은 브라우저 보안상 지원되지 않습니다. 대신 저장 파일명은 상품명+시간 기준으로 자동 구분되도록 개선했습니다.")
 
 
-def render_inputs() -> List[Any]:
+def uploaded_files_to_assets(uploaded_files: List[Any]) -> List[MediaAsset]:
+    assets: List[MediaAsset] = []
+    for file in uploaded_files:
+        mime = file.type or "application/octet-stream"
+        kind = "video" if mime.startswith("video/") else "image"
+        assets.append(MediaAsset(kind=kind, name=file.name, mime=mime, data=file.getvalue()))
+    return assets
+
+
+def render_inputs() -> List[MediaAsset]:
     left, right = st.columns([1.15, 0.85], gap="large")
 
     with left:
@@ -563,32 +749,41 @@ def render_inputs() -> List[Any]:
         st.subheader("입력 정보")
         st.text_input("상품 URL", key="product_url", placeholder="상품 URL 또는 이벤트 링크를 입력하세요")
         st.text_area(
-            "상품, 이벤트 주요 내용",
-            key="source_text",
-            height=300,
-            placeholder="상품명, 특징, 세일 정보, 타겟 고객, 강조 포인트 등을 자유롭게 입력하세요",
+            "상품내용",
+            key="product_text",
+            height=210,
+            placeholder="상세페이지 상품설명, 상품스펙, 소재, 핏, 컬러, 사이즈, USP 등을 입력하세요",
+        )
+        st.text_area(
+            "이벤트 주요내용",
+            key="event_text",
+            height=140,
+            placeholder="세일, 쿠폰, 기간, 증정, 이벤트 메시지 등 별도 이벤트가 있을 때 입력하세요",
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
     with right:
         st.markdown('<div class="misharp-card">', unsafe_allow_html=True)
-        st.subheader("이미지 등록")
-        images = st.file_uploader(
-            "상품 이미지 또는 이벤트 배너",
-            type=["png", "jpg", "jpeg", "webp"],
+        st.subheader("이미지 / 동영상 등록")
+        uploads = st.file_uploader(
+            "상품 이미지 또는 동영상",
+            type=["png", "jpg", "jpeg", "webp", "mp4", "mov", "m4v", "webm", "avi"],
             accept_multiple_files=True,
-            key="image_uploads",
-            help="텍스트 없이 이미지 만으로도 분석 가능하도록 설계했습니다.",
+            key=f"media_uploads_{st.session_state.media_uploader_nonce}",
+            help="텍스트 없이 이미지나 동영상만으로도 생성 가능합니다. 동영상은 대표 프레임을 추출해 참고합니다.",
         )
-        if images:
-            st.caption(f"업로드됨: {len(images)}장")
-            preview_cols = st.columns(min(3, len(images)))
-            for i, img in enumerate(images[:3]):
-                with preview_cols[i % len(preview_cols)]:
-                    st.image(img, use_container_width=True)
-        st.markdown('<p class="misharp-mini">입력값은 URL, 텍스트, 이미지 중 1개 이상만 있어도 생성 가능합니다.</p>', unsafe_allow_html=True)
+        assets = uploaded_files_to_assets(uploads or [])
+        if assets:
+            st.caption(f"업로드됨: {len(assets)}개")
+            for asset in assets[:4]:
+                if asset.kind == "image":
+                    st.image(asset.data, use_container_width=True)
+                else:
+                    st.video(asset.data)
+                    st.caption(f"동영상 참고: {asset.name}")
+        st.markdown('<p class="misharp-mini">입력값은 URL, 텍스트, 이미지, 동영상 중 1개 이상만 있어도 생성 가능합니다.</p>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
-    return images or []
+    return assets
 
 
 def render_channel_selector() -> None:
@@ -599,25 +794,25 @@ def render_channel_selector() -> None:
         unsafe_allow_html=True,
     )
 
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.checkbox("SMS 문자", key="channel_sms")
-    with c2:
+        st.checkbox("SMS문자(단문,장문)", key="channel_sms")
         st.checkbox("앱푸시", key="channel_app_push")
-    with c3:
+    with c2:
+        st.checkbox("동영상 원고", key="channel_video_script")
         st.checkbox("인스타 릴스 피드", key="channel_instagram")
-    with c4:
+    with c3:
         st.checkbox("틱톡 피드", key="channel_tiktok")
-    with c5:
-        st.checkbox("유튜브 숏츠 피드", key="channel_youtube")
-    with c6:
+        st.checkbox("유튜브 쇼츠 피드", key="channel_youtube")
+    with c4:
+        st.checkbox("카카오스타일", key="channel_kakaostyle")
         st.checkbox("REVIEW", key="channel_review")
 
-    sms_left, sms_right = st.columns([0.3, 0.7])
+    sms_left, sms_right = st.columns([0.28, 0.72])
     with sms_left:
         st.radio("SMS 유형", ["장문", "단문"], key="sms_mode", horizontal=True)
     with sms_right:
-        st.caption("SMS 채널 선택 시에만 적용됩니다. 단문은 56자 제한 규칙을 적용합니다.")
+        st.caption("SMS 채널 선택 시에만 적용됩니다. 단문은 '(광고)미샵♥' 시작, 끝기호 포함 55자 이내 규칙을 강제 적용합니다.")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -631,7 +826,7 @@ def render_output() -> None:
         st.download_button(
             "텍스트 파일 다운로드",
             data=output.encode("utf-8"),
-            file_name="misharp_marketing_output.txt",
+            file_name=f"misharp_marketing_output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
             mime="text/plain",
         )
         st.code(output, language=None)
@@ -644,21 +839,44 @@ def render_output() -> None:
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-def validate_inputs(images: List[Any]) -> GenerationInput:
+def render_policy_section() -> None:
+    st.markdown('<div class="misharp-card">', unsafe_allow_html=True)
+    st.subheader("정책 안내")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown('<div class="policy-box">', unsafe_allow_html=True)
+        st.markdown("**개인정보 처리지침**")
+        st.text(PRIVACY_POLICY_TEXT)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown('<div class="policy-box">', unsafe_allow_html=True)
+        st.markdown("**서비스 약관**")
+        st.text(TERMS_TEXT)
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def validate_inputs(media_assets: List[MediaAsset]) -> GenerationInput:
     selected_channels = selected_channels_from_state()
     if not selected_channels:
         raise ValueError("최소 1개 이상의 출력 채널을 선택해주세요.")
 
-    has_any_input = bool(st.session_state.product_url.strip() or st.session_state.source_text.strip() or images)
+    has_any_input = bool(
+        st.session_state.product_url.strip()
+        or st.session_state.product_text.strip()
+        or st.session_state.event_text.strip()
+        or media_assets
+    )
     if not has_any_input:
-        raise ValueError("상품 URL, 주요 내용, 이미지 중 최소 1개 이상 입력해주세요.")
+        raise ValueError("상품 URL, 상품내용, 이벤트 주요내용, 이미지/동영상 중 최소 1개 이상 입력해주세요.")
 
     return GenerationInput(
         product_url=st.session_state.product_url.strip(),
-        source_text=st.session_state.source_text.strip(),
+        product_text=st.session_state.product_text.strip(),
+        event_text=st.session_state.event_text.strip(),
         selected_channels=selected_channels,
         sms_mode=st.session_state.sms_mode,
-        uploaded_images=images,
+        media_assets=media_assets,
     )
 
 
@@ -667,13 +885,13 @@ def main() -> None:
     inject_css()
     render_header()
     render_controls()
-    uploaded_images = render_inputs()
+    media_assets = render_inputs()
     render_channel_selector()
 
     if st.button("광고문구 생성하기", type="primary", use_container_width=True):
         try:
-            data = validate_inputs(uploaded_images)
-            st.session_state.last_payload = make_payload(uploaded_images)
+            data = validate_inputs(media_assets)
+            st.session_state.last_payload = make_payload(media_assets)
             with st.spinner("미샵 톤으로 광고문구를 생성하고 있습니다..."):
                 st.session_state.generated_output = generate_marketing_copy(data)
             st.success("생성이 완료되었습니다.")
@@ -681,12 +899,13 @@ def main() -> None:
             st.error(str(exc))
 
     render_output()
+    render_policy_section()
 
     st.markdown(
         f"""
         <div class="misharp-footer">
             <div>{COPYRIGHT}</div>
-            <div style="margin-top:6px;">개인정보 처리방침 · 서비스 약관</div>
+            <div style="margin-top:6px;">개인정보 처리지침 · 서비스 약관</div>
         </div>
         """,
         unsafe_allow_html=True,
