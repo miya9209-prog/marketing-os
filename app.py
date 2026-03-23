@@ -23,7 +23,7 @@ html, body, [class*="css"] {
 }
 .block-container {
   max-width: 1240px;
-  padding-top: 2.4rem !important;   /* 상단 잘림 방지 */
+  padding-top: 2.4rem !important;
   padding-bottom: 2.5rem;
 }
 .misharp-header {
@@ -32,7 +32,7 @@ html, body, [class*="css"] {
   padding: 30px 32px 26px 32px;
   color: #251a2e;
   box-shadow: 0 8px 28px rgba(0,0,0,.18);
-  margin-top: 0.4rem;              /* 헤더 위 여백 추가 */
+  margin-top: 0.4rem;
   margin-bottom: 14px;
 }
 .misharp-header h1{
@@ -47,17 +47,55 @@ html, body, [class*="css"] {
   color:#6b4f45;
   font-size:1.02rem;
 }
+
+/* 버튼 높이/너비/정렬 통일 */
 .stButton > button,
 .stDownloadButton > button,
-a[data-testid="stLinkButton"]{
-  width: 100%;
-  min-height: 52px;
+a[data-testid="stLinkButton"],
+div[data-testid="stPopover"] > button,
+button[kind="secondary"],
+button[kind="tertiary"]{
+  width: 100% !important;
+  height: 52px !important;
+  min-height: 52px !important;
+  max-height: 52px !important;
   border-radius: 16px !important;
   border: 1px solid #314156 !important;
   background: rgba(10,18,32,.72) !important;
   color:#fff !important;
   font-weight:800 !important;
+  padding: 0 16px !important;
+  line-height: 1 !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  box-sizing:border-box !important;
+  margin:0 !important;
 }
+
+/* 팝오버 트리거 버튼도 동일 */
+div[data-testid="stPopover"]{
+  width:100% !important;
+}
+div[data-testid="stPopover"] > button p,
+.stButton > button p,
+.stDownloadButton > button p,
+button[kind="secondary"] p,
+button[kind="tertiary"] p{
+  font-size: 1.08rem !important;
+  font-weight: 800 !important;
+  margin: 0 !important;
+}
+
+/* 버튼 행 아래 들쭉날쭉 방지 */
+[data-testid="column"] > div{
+  height: 100%;
+}
+.misharp-btn-row{
+  margin-top: 2px;
+  margin-bottom: 0;
+}
+
 hr.misharp-divider{
   border:none;
   border-top:1px solid rgba(52,69,91,.7);
@@ -126,6 +164,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+st.markdown('<div class="misharp-btn-row"></div>', unsafe_allow_html=True)
 btn_cols = st.columns(5, gap="small")
 
 with btn_cols[0]:
