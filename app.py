@@ -14,8 +14,8 @@ st.set_page_config(
 # ---------- State ----------
 if "result" not in st.session_state:
     st.session_state.result = ""
-if "uploader_nonce" not in st.session_state:
-    st.session_state.uploader_nonce = 0
+if "ui_nonce" not in st.session_state:
+    st.session_state.ui_nonce = 0
 
 # ---------- Style ----------
 st.markdown("""
@@ -116,23 +116,22 @@ hr.misharp-divider{
 
 # ---------- Helpers ----------
 CHANNELS = [
-    ("ch_sms", "SMS문자"),
-    ("ch_app_push", "앱푸시"),
-    ("ch_video_script", "동영상 원고"),
-    ("ch_insta_reels", "인스타 릴스 피드"),
-    ("ch_tiktok", "틱톡 피드"),
-    ("ch_youtube_shorts", "유튜브 쇼츠 피드"),
-    ("ch_kakaostyle", "카카오스타일"),
-    ("ch_review", "REVIEW"),
+    ("sms", "SMS문자"),
+    ("app_push", "앱푸시"),
+    ("video_script", "동영상 원고"),
+    ("insta_reels", "인스타 릴스 피드"),
+    ("tiktok", "틱톡 피드"),
+    ("youtube_shorts", "유튜브 쇼츠 피드"),
+    ("kakaostyle", "카카오스타일"),
+    ("review", "REVIEW"),
 ]
 
+def key(name: str) -> str:
+    return f"{name}_{st.session_state.ui_nonce}"
+
 def reset_all():
-    keep = {"uploader_nonce"}
-    for k in list(st.session_state.keys()):
-        if k not in keep:
-            del st.session_state[k]
     st.session_state.result = ""
-    st.session_state.uploader_nonce += 1
+    st.session_state.ui_nonce += 1
 
 def sanitize_filename(value: str) -> str:
     value = (value or "").strip()
@@ -141,18 +140,27 @@ def sanitize_filename(value: str) -> str:
     value = value.strip("._-")
     return value[:40] or "work"
 
+def get_value(name: str, default=""):
+    return st.session_state.get(key(name), default)
+
+def selected_channels():
+    out = []
+    for ch, _ in CHANNELS:
+        if st.session_state.get(key(ch), False):
+            out.append(ch)
+    return out
+
 def current_payload():
-    # Save only JSON-safe fields
     return {
-        "product_url": st.session_state.get("product_url", ""),
-        "product_content": st.session_state.get("product_content", ""),
-        "event_content": st.session_state.get("event_content", ""),
-        "sms_mode": st.session_state.get("sms_mode", "단문"),
-        "selected_channels": [key for key, _ in CHANNELS if st.session_state.get(key, False)],
+        "product_url": get_value("product_url", ""),
+        "product_content": get_value("product_content", ""),
+        "event_content": get_value("event_content", ""),
+        "sms_mode": get_value("sms_mode", "단문"),
+        "selected_channels": selected_channels(),
     }
 
 def build_prompt(data: dict) -> str:
-    selected_labels = [label for key, label in CHANNELS if key in data.get("selected_channels", [])]
+    selected_labels = [label for ch, label in CHANNELS if ch in data.get("selected_channels", [])]
     return f"""
 당신은 대한민국 4050 여성 타겟 온라인 패션 마케팅에 강한 최고 수준의 카피라이터입니다.
 모든 결과는 한국어로 작성하세요.
@@ -209,8 +217,8 @@ with btn_cols[0]:
         st.rerun()
 
 with btn_cols[1]:
-    product_content = st.session_state.get("product_content") or ""
-    product_url = st.session_state.get("product_url") or ""
+    product_content = get_value("product_content", "")
+    product_url = get_value("product_url", "")
     file_base = sanitize_filename(product_content[:24] if product_content else product_url)
     save_name = f"misharp_marketing_os_{file_base}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     st.download_button(
@@ -227,16 +235,18 @@ with btn_cols[2]:
             "파일 선택",
             type=["json"],
             label_visibility="collapsed",
-            key=f"load_{st.session_state.uploader_nonce}"
+            key=key("load_json")
         )
         if load_file:
             data = json.load(load_file)
-            st.session_state.product_url = data.get("product_url", "")
-            st.session_state.product_content = data.get("product_content", "")
-            st.session_state.event_content = data.get("event_content", "")
-            st.session_state.sms_mode = data.get("sms_mode", "단문")
-            for key, _ in CHANNELS:
-                st.session_state[key] = key in data.get("selected_channels", [])
+            # Load into current nonce keys
+            st.session_state[key("product_url")] = data.get("product_url", "")
+            st.session_state[key("product_content")] = data.get("product_content", "")
+            st.session_state[key("event_content")] = data.get("event_content", "")
+            st.session_state[key("sms_mode")] = data.get("sms_mode", "단문")
+            selected = set(data.get("selected_channels", []))
+            for ch, _ in CHANNELS:
+                st.session_state[key(ch)] = ch in selected
             st.success("불러오기 완료")
 
 with btn_cols[3]:
@@ -251,13 +261,13 @@ st.markdown("<hr class='misharp-divider'>", unsafe_allow_html=True)
 c1, c2 = st.columns([1.05, 0.95], gap="large")
 with c1:
     st.markdown('<div class="misharp-section-title">입력 정보</div>', unsafe_allow_html=True)
-    st.text_input("상품 URL", key="product_url", placeholder="상품 URL 또는 이벤트 링크를 입력하세요")
-    st.text_area("상품내용", key="product_content", height=220, placeholder="상세페이지 상품설명, 상품스펙, 소재, 핏, 컬러, 사이즈, USP 등을 입력하세요")
-    st.text_area("이벤트 주요내용", key="event_content", height=120, placeholder="할인율, 기간, 혜택, 쿠폰, 무료배송 등 이벤트 정보를 입력하세요")
+    st.text_input("상품 URL", key=key("product_url"), placeholder="상품 URL 또는 이벤트 링크를 입력하세요")
+    st.text_area("상품내용", key=key("product_content"), height=220, placeholder="상세페이지 상품설명, 상품스펙, 소재, 핏, 컬러, 사이즈, USP 등을 입력하세요")
+    st.text_area("이벤트 주요내용", key=key("event_content"), height=120, placeholder="할인율, 기간, 혜택, 쿠폰, 무료배송 등 이벤트 정보를 입력하세요")
 
 with c2:
     st.markdown('<div class="misharp-section-title">이미지 / 동영상 등록</div>', unsafe_allow_html=True)
-    st.file_uploader("파일 업로드", accept_multiple_files=True, key=f"media_{st.session_state.uploader_nonce}")
+    st.file_uploader("파일 업로드", accept_multiple_files=True, key=key("media"))
     st.caption("입력값은 URL, 텍스트, 이미지, 동영상 중 1개 이상이면 생성 가능합니다.")
 
 st.markdown("<hr class='misharp-divider'>", unsafe_allow_html=True)
@@ -266,21 +276,21 @@ st.markdown("<hr class='misharp-divider'>", unsafe_allow_html=True)
 st.markdown('<div class="misharp-section-title" style="font-size:1.75rem;">출력 채널 선택</div>', unsafe_allow_html=True)
 r1, r2, r3, r4 = st.columns(4)
 with r1:
-    st.checkbox("SMS문자", key="ch_sms")
-    st.checkbox("앱푸시", key="ch_app_push")
+    st.checkbox("SMS문자", key=key("sms"))
+    st.checkbox("앱푸시", key=key("app_push"))
 with r2:
-    st.checkbox("동영상 원고", key="ch_video_script")
-    st.checkbox("인스타 릴스 피드", key="ch_insta_reels")
+    st.checkbox("동영상 원고", key=key("video_script"))
+    st.checkbox("인스타 릴스 피드", key=key("insta_reels"))
 with r3:
-    st.checkbox("틱톡 피드", key="ch_tiktok")
-    st.checkbox("유튜브 쇼츠 피드", key="ch_youtube_shorts")
+    st.checkbox("틱톡 피드", key=key("tiktok"))
+    st.checkbox("유튜브 쇼츠 피드", key=key("youtube_shorts"))
 with r4:
-    st.checkbox("카카오스타일", key="ch_kakaostyle")
-    st.checkbox("REVIEW", key="ch_review")
+    st.checkbox("카카오스타일", key=key("kakaostyle"))
+    st.checkbox("REVIEW", key=key("review"))
 
 sms_col, _ = st.columns([0.28, 0.72])
 with sms_col:
-    st.radio("SMS 유형", ["단문", "장문"], key="sms_mode", horizontal=True)
+    st.radio("SMS 유형", ["단문", "장문"], key=key("sms_mode"), horizontal=True)
 
 st.markdown("<hr class='misharp-divider'>", unsafe_allow_html=True)
 
@@ -296,7 +306,7 @@ if st.button("문구 생성", use_container_width=True):
         try:
             with st.spinner("문구를 생성하고 있습니다..."):
                 out = call_gpt(build_prompt(payload))
-            if "ch_sms" in payload["selected_channels"] and payload["sms_mode"] == "단문":
+            if "sms" in payload["selected_channels"] and payload["sms_mode"] == "단문":
                 out = truncate_sms(out)
             st.session_state.result = out
         except Exception as e:
