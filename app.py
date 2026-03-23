@@ -26,12 +26,12 @@ if "loaded_notice" not in st.session_state:
 CHANNELS = [
     ("sms", "SMS문자"),
     ("app_push", "앱푸시"),
+    ("video_script", "동영상 원고"),
     ("insta_reels", "인스타 릴스 피드"),
     ("tiktok", "틱톡 피드"),
     ("youtube_shorts", "유튜브 숏츠 피드"),
-    ("review", "REVIEW"),
-    ("video_script", "동영상 원고"),
     ("kakaostyle", "카카오스타일"),
+    ("review", "REVIEW"),
 ]
 CHANNEL_LABELS = dict(CHANNELS)
 
@@ -127,16 +127,20 @@ hr.misharp-divider{
   margin:0 0 12px 0;
   color:white;
 }
-.misharp-mini{
-  color:#9eb0c5;
-  font-size:.92rem;
-}
 .misharp-footer{
   color:#94a3b8;
   text-align:center;
   font-size:.92rem;
   margin-top:28px;
   padding:12px 0 6px 0;
+}
+.misharp-footer-links{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:4px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -180,15 +184,9 @@ def current_payload():
         "media_names": media_names,
     }
 
-def build_prompt(data: dict) -> str:
-    selected_labels = [CHANNEL_LABELS[ch] for ch in data["selected_channels"]]
+def base_context(data: dict) -> str:
     media_note = ", ".join(data.get("media_names", [])) if data.get("media_names") else "없음"
-
     return f"""
-당신은 미샵의 광고문구 자동생성 엔진입니다.
-반드시 아래 기획 지침을 그대로 따르세요.
-모든 출력은 한국어로만 작성하세요.
-
 [입력 정보]
 상품 URL:
 {data.get("product_url","")}
@@ -201,39 +199,79 @@ def build_prompt(data: dict) -> str:
 
 업로드 파일명 참고:
 {media_note}
+"""
 
-선택 채널:
-{", ".join(selected_labels)}
+def prompt_for_channel(channel: str, data: dict) -> str:
+    base = base_context(data)
+    if channel == "review":
+        return f"""
+당신은 미샵 여성의류 상품의 실사용 후기를 쓰는 카피라이터입니다.
+반드시 아래 지침을 빠짐없이 지키세요.
+모든 출력은 한국어로만 작성하세요.
 
-[공통 출력 형식]
-선택된 채널만 아래 형식으로 차례대로 출력:
-==============================
-채널명
-==============================
-내용
+{base}
 
-[매우 중요한 공통 규칙]
-- 채널명 외의 서론, 설명, 사족 금지
-- 선택하지 않은 채널은 절대 출력 금지
-- 4050 여성이 실제로 공감할 말투로 작성
-- 정보가 부족하면 입력된 내용만 바탕으로 작성
-- 이모지 사용 금지
+[출력 형식]
+- 제목 금지
+- 설명 금지
+- 후기 10개만 바로 출력
+- 각 후기 앞에 반드시 (키/몸무게) 형식으로 시작
+예: (158/54)
 
-[SMS 문자 규칙]
+[리뷰 작성 지침]
+- 제시한 설명 또는 URL, 이미지의 미샵 여성의류 상품에 대해 고객 구매를 도와줄 수 있는 생활 밀착형, 공감형 상품 사용 후기 작성
+- 4050대 일반인 여성이 쓴 듯한 일상적 문체
+- 배송받아서 처음 입어본 소감의 말투
+- 옷, 패션 관련 전문용어 금지, 일반인들이 생활 속에서 사용하는 문장과 단어로 구성
+- 총 10개 작성
+- 10개 중 긴글 5개, 짧은 글 5개
+- 각 후기는 50자에서 300자 사이
+- 10명의 다른 작성자가 쓴 것처럼 성격과 글쓰기 스타일이 전부 달라야 함
+- 키 155cm~163cm 사이, 체중 52kg~63kg 사이로만 설정
+- 후기글 앞에 각각 (키/몸무게) 넣고 시작, 매우 중요
+- 체형 대비 입었을 때의 만족감이 드러나야 함
+- 옷 품질, 구매과정 경험, 활용성 반영
+- 가성비 강조
+- ㅎㅎ, ~~, ^^, :) 등을 적절히 섞기
+- 배송이 빨랐다, 역시 미샵에서 사길 잘했다 같은 내용 적절히 섞기
+- 후기글에 제목 빼기
+- 후기글에 상품명 빼기
+- 같은 문장 반복 금지
+- 10개 후기를 한 줄씩 구분해서 출력
+
+[길이 구성 규칙]
+- 1~5번 후기는 120자~300자
+- 6~10번 후기는 50자~120자
+
+[최종 점검]
+- 10개가 전부 다른 사람 말투인가?
+- 전문용어가 들어가진 않았는가?
+- 각 후기 앞에 (키/몸무게)가 붙었는가?
+- 상품명이 들어가지 않았는가?
+- 배송/가성비/체형 만족감 중 최소 2개 이상이 자연스럽게 들어갔는가?
+"""
+    if channel == "sms":
+        return f"""
+당신은 미샵 SMS 카피라이터입니다. 모든 출력은 한국어로만 작성하세요.
+
+{base}
+
+[출력 형식]
+단문이면 시안 3개만 출력.
+장문이면 시안 3개만 출력.
+
+[규칙]
 - SMS 유형: {data.get("sms_mode","단문")}
-- 단문문자는 한글 56자 기준 이내
-- 첫문구 시작은 반드시 "(광고)미샵♥"
+- 단문문자는 반드시 "(광고)미샵♥"로 시작
 - 문구 끝은 반드시 "▶"
 - 시작과 끝 포함 전체 56자 이내
 - 후킹성, 신선함, 긴박감 반영
-- 단문은 3가지 시안 출력
-
-- 장문문자는 제한 없음
-- 장문문자 출력 형식:
+- 장문문자는 아래 형식을 반드시 따를 것:
 상담고정 제목 : (광고)미샵 "이벤트명"
-이벤트 문구(연결 링크 등 포함)
-그리고 아래 고정 문구를 반드시 그대로 하단에 붙일 것:
 
+이벤트 문구(연결 링크 등 포함)
+
+아래 내용은 하단 고정
 ※혹시 피싱문자 우려되신다면 네이버 검색창에 "미샵" 검색 후 클릭하셔서 주말이벤트 확인해주세요:)
 
 ♡일상을 위한 데일리룩, 출근룩 쇼핑에 꼭 활용해보세요.
@@ -248,94 +286,107 @@ http://misharp.co.kr
 ♡유튜브 미샵TV, 틱톡, 카카오스토리에서 미샵의 다양한 컨텐츠를 만나보세요:)
 
 M  I  S  H  A  R  P
+"""
+    if channel == "app_push":
+        return f"""
+당신은 20년 이상 4050 여성 패션 쇼핑몰을 운영해 온 베테랑 MD이자 4050 여성 고객 심리를 가장 잘 이해하는 앱푸시 마케팅 전문가입니다.
+모든 출력은 한국어로만 작성하세요.
 
-- 장문은 3가지 시안 출력
+{base}
 
-[앱푸시 규칙]
-아래 지침을 반드시 그대로 지킬 것.
+[공통 작성 원칙]
 - 할인율을 첫 문장에 바로 노출하지 말 것
 - 과도한 느낌표, 자극적인 홈쇼핑 말투 금지
-- 정보 나열형 문구 금지
-- 광고내용에 상품명은 [상품명] 형식으로 구분, 광고문구에 상품명은 1번만 넣기
-- 문구 구조는 반드시 상황 공감 → 이유 제시 → 행동 유도
-- 아래 키워드 중 최소 1개 이상 자연스럽게 반영:
-붙지 않음 / 체형커버 / 오래 입음 / 코디 쉬움 / 자주 손이 감
+- 정보 나열형 문구, 광고 티가 강한 문구 금지
+- 광고내용에 상품명은 [ ]로 구분. 상품명은 광고문구에 1번만 들어가기
+- 문구 구조는 상황 공감 → 이유 제시 → 행동 유도
+- 아래 키워드 중 최소 1개 이상 자연스럽게 반영
+(붙지 않음 / 체형커버 / 오래 입음 / 코디 쉬움 / 자주 손이 감)
 
-앱푸시는 반드시 아래 3타입을 모두 작성:
-[타입1] 24시간 MD추천 앱푸시
-출력 형식:
-헤드라인 : 30자 이내(5가지 시안)
+[출력 형식]
+아래 3타입을 모두 출력
+
+[타입1]
+헤드라인 : 30자 이내(5가지 시안 제안)
 광고문구 : 3종 제안
 광고)24시간 MD추천 10%할인 [상품명]
 (푸시 문구 – 한글 50자 이내)
 수신거부설정: 알림함-설정버튼
 
-[타입2] 주말한정 MD추천 앱푸시
-출력 형식:
-헤드라인 : 30자 이내(5가지 시안)
+[타입2]
+헤드라인 : 30자 이내(5가지 시안 제안)
 광고문구 : 3종 제안
 광고)주말한정 MD추천 10%할인 [상품명]
 (푸시 문구 – 한글 50자 이내)
 수신거부설정: 알림함-설정버튼
 
-[타입3] 이벤트 관련 내용 인풋
-출력 형식:
-헤드라인 : 30자 이내(5가지 시안)
-광고문구(3종 제안) : 광고) [이벤트명] + 광고문구 + 수신거부설정: 알림함-설정버튼
-총 100자 이내
+[타입3]
+헤드라인 : 30자 이내(5가지 시안 제안)
+광고문구(3종 제안) : 광고) [이벤트명] + 광고문구 + 수신거부설정: 알림함-설정버튼 ->총 100자 이내
+"""
+    if channel == "insta_reels":
+        return f"""
+모든 출력은 한국어로만 작성하세요.
 
-[인스타 릴스 피드 규칙]
-- 총 15줄 작성
-- 첫째줄: 헤드라인
-- 둘째줄: 미샵 상품명
-- 상품특성을 4050여성 공감형 내용으로 작성
-- 진짜 사람이 말하는 여성들의 친근한 어투
-- 마지막 줄은 CTA 문구
-- 15줄 다음 한 줄 띄우고 해시태그 5개
-- #미샵 을 제일 앞에, 나머지 4개 해시태그
-- 해시태그 다음 한 줄 띄우고 아래 두 줄을 그대로 출력
+{base}
+
+[규칙]
+1. 작성된 상품 원고를 바탕으로 인스타 피드 원고 작성
+2. 첫째줄 - 헤드라인
+3. 둘째줄 - 미샵 상품명
+4. 상품특성을 4050여성의 공감을 얻을 수 있는 내용
+5. 진짜 사람이 말하는 거 같은 여성들만의 친근한 어투
+6. 마지막 줄은 CTA 문구
+7. 총 15줄 작성
+8. 다음에 한줄 띄우고 해시태그 5개("#미샵"을 제일 앞에, 나머지 4개 해시태그)
+9. 해시태그 다음에 한줄 띄우고 아래 문구 그대로 출력
 자세한 상품정보는 상단 프로필 링크 참조
 일상도 스타일도 미샵처럼, 심플하게! MISHARP
+10. 이모지 빼기
+"""
+    if channel == "tiktok":
+        return f"""
+모든 출력은 한국어로만 작성하세요.
 
-[틱톡 피드 규칙]
-- 총 15줄 작성
-- 첫째줄: 헤드라인
-- 둘째줄: 미샵 상품명
-- 상품특성을 4050여성 공감형 내용으로 작성
-- 마지막 줄은 CTA 문구
-- 15줄 다음 한 줄 띄우고 해시태그 5개
-- #미샵 을 제일 앞에, 나머지 4개 해시태그
-- 해시태그 다음 한 줄 띄우고 아래 두 줄을 그대로 출력
+{base}
+
+[규칙]
+1. 작성된 상품 원고를 바탕으로 틱톡 피드 원고 작성
+2. 첫째줄 - 헤드라인
+3. 둘째줄 - 미샵 상품명
+4. 상품특성을 4050여성의 공감을 얻을 수 있는 내용
+5. 진짜 사람이 말하는 거 같은 여성들만의 친근한 어투
+6. 마지막 줄은 CTA 문구
+7. 총 15줄 작성
+8. 다음에 한줄 띄우고 해시태그 5개("#미샵"을 제일 앞에, 나머지 4개 해시태그)
+9. 해시태그 다음에 한줄 띄우고 아래 문구 그대로 출력
 자세한 상품정보는 하단 상품링크 또는 상단 프로필 링크 참조
 일상도 스타일도 미샵처럼, 심플하게! MISHARP
+10. 이모지 빼기
+"""
+    if channel == "youtube_shorts":
+        return f"""
+모든 출력은 한국어로만 작성하세요.
 
-[유튜브 숏츠 피드 규칙]
-- 타이틀 100자 이내
-- 후킹성 강한 타이틀 다음에 해시태그 8~10개 포함
+{base}
+
+[규칙]
+- 타이틀 : 100자 이내 후킹성 강한 타이틀
+- 타이틀 바로 뒤에 해시태그 8~10개 포함
 - #미샵 #shorts #ootd 포함 필수
-- 설명 피드는 상품내용 공감형, TPO 담아 작성
+- 설명 피드 : 상품내용 공감형, TPO 담아 설명글 작성
 - 마지막에 CTA 문구
-- 최하단에 아래 문구 그대로 출력
-상세한 상품정보는 영상 하단 상품배너 클릭
-- 그 아래 상품 해시태그 10개
-
-[REVIEW 규칙]
-- 총 10개 작성
-- 긴글 5개, 짧은 글 5개
-- 각 후기 50자~300자
-- 10명이 각각 다른 성격과 다른 글쓰기 스타일
-- 키 155cm~163cm, 몸무게 52kg~63kg 범위
-- 각 후기 앞에 반드시 (키/몸무게) 형식
-- 배송받아서 처음 입어본 소감 말투
-- 옷, 패션 전문용어 금지
-- 4050 일반인 여성이 쓴 듯한 생활 문체
-- 체형 대비 만족감, 품질, 구매경험, 활용성, 가성비 반영
-- ㅎㅎ, ~~ , ^^, :) 등을 적절히 섞기
-- 배송이 빨랐다 / 역시 미샵에서 사길 잘했다 같은 내용 적절히 반영
-- 제목 금지, 상품명 금지
-
-[동영상 원고 규칙]
+- 최하단에 "상세한 상품정보는 영상 하단 상품배너 클릭" 넣기
+- 그 아래 상품 해시태그 10개 넣기
+"""
+    if channel == "video_script":
+        return f"""
 당신은 최고의 온라인마케터이자 박웅현, 정철, 최인아와 같은 최고의 카피라이터입니다.
+모든 출력은 한국어로만 작성하세요.
+
+{base}
+
+[규칙]
 - 20~30초 길이
 - 대한민국 4050 여성 타겟
 - 합리적 소비, 납득 가능한 선택을 유도
@@ -347,25 +398,30 @@ M  I  S  H  A  R  P
 - 의성어 의태어 활용
 - A/B 2타입
 - 첫줄 헤드라인은 별도로 5개 타입 제안
+"""
+    if channel == "kakaostyle":
+        return f"""
+모든 출력은 한국어로만 작성하세요.
 
-[카카오스타일 규칙]
-- 최상단: 후킹성 헤드라인
-- 본문 둘째 줄: 상품명
+{base}
+
+[규칙]
+- 최상단 : 후킹성 헤드라인
+- 본문 둘째 줄 : 상품명
 - 그 아래 150자 이내 뉴스형식 요약
 - 본문 하단 "상품 바로가기 ▼"
 - 다음 줄에 URL 그대로 삽입
 - 한 줄 띄우고 "일상도 스타일도 미샵처럼, 심플하게! MISHARP"
 - 그 아래 해시태그 30개 삽입
-- 필수 해시태그: #미샵 #여성의류쇼핑몰 #중년여성패션 #ootd #데일리룩 #출근룩
-
-반드시 기획 지침을 빠짐없이 따르고, 선택 채널 결과를 차례대로 출력하세요.
+- 필수 해시태그 : #미샵 #여성의류쇼핑몰 #중년여성패션 #ootd #데일리룩 #출근룩
 """
+    return base
 
 def call_gpt(prompt: str) -> str:
     client = OpenAI()
     model_name = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     response = client.responses.create(model=model_name, input=prompt)
-    return response.output_text
+    return response.output_text.strip()
 
 def short_sms_cleanup(body: str) -> str:
     lines = []
@@ -384,57 +440,20 @@ def short_sms_cleanup(body: str) -> str:
         lines.append(s)
     return "\n".join(lines[:3])
 
-def long_sms_cleanup(body: str) -> str:
-    required_footer = """※혹시 피싱문자 우려되신다면 네이버 검색창에 "미샵" 검색 후 클릭하셔서 주말이벤트 확인해주세요:)
-
-♡일상을 위한 데일리룩, 출근룩 쇼핑에 꼭 활용해보세요.
-
-일상도 스타일도 미샵처럼, 심플하게! MISHARP
-
-♡지금 미샵 바로가기
-http://misharp.co.kr
-
-♡요즘 핫한 미샵 인스타그램, 지금 만나보세요:)(@misharp2006)
-
-♡유튜브 미샵TV, 틱톡, 카카오스토리에서 미샵의 다양한 컨텐츠를 만나보세요:)
-
-M  I  S  H  A  R  P"""
-    if required_footer not in body:
-        body = body.strip() + "\n\n" + required_footer
-    return body
-
-def enforce_sections(text: str, selected: list) -> str:
-    # make sure section headers exist if model slightly deviates
-    fixed = text.strip()
-
-    # SMS postprocess
-    if "sms" in selected:
-        pattern = re.compile(r"(=+\nSMS문자\n=+\n)(.*?)(?=\n=+\n|\Z)", re.DOTALL)
-        match = pattern.search(fixed)
-        if match:
-            body = match.group(2).strip()
-            mode = get_value("sms_mode", "단문")
-            body = short_sms_cleanup(body) if mode == "단문" else long_sms_cleanup(body)
-            fixed = fixed[:match.start(2)] + body + fixed[match.end(2):]
-
-    # app push basic cleanup
-    if "app_push" in selected:
-        fixed = re.sub(r"\[상품명\]", "[상품명]", fixed)
-
-    # kakaostyle url inject
-    if "kakaostyle" in selected:
-        url = get_value("product_url", "").strip()
-        if url and "카카오스타일" in fixed and url not in fixed:
-            pattern = re.compile(r"(=+\n카카오스타일\n=+\n)(.*?)(?=\n=+\n|\Z)", re.DOTALL)
-            m = pattern.search(fixed)
-            if m:
-                body = m.group(2).strip()
-                if "상품 바로가기 ▼" in body:
-                    body = body.replace("상품 바로가기 ▼", f"상품 바로가기 ▼\n{url}", 1)
-                else:
-                    body += f"\n상품 바로가기 ▼\n{url}"
-                fixed = fixed[:m.start(2)] + body + fixed[m.end(2):]
-    return fixed
+def build_final_output(channel_outputs: dict, data: dict) -> str:
+    parts = []
+    for ch, label in CHANNELS:
+        if ch not in channel_outputs:
+            continue
+        body = channel_outputs[ch].strip()
+        if ch == "sms" and data.get("sms_mode") == "단문":
+            body = short_sms_cleanup(body)
+        if ch == "kakaostyle":
+            url = data.get("product_url", "").strip()
+            if url and "상품 바로가기 ▼" in body and url not in body:
+                body = body.replace("상품 바로가기 ▼", f"상품 바로가기 ▼\n{url}", 1)
+        parts.append(f"==============================\n{label}\n==============================\n{body}")
+    return "\n\n".join(parts)
 
 # ---------------------------
 # Header
@@ -445,14 +464,6 @@ st.markdown("""
   <p>온라인 셀러를 위한 SNS 매체별 최적화 광고문구 자동 생성기</p>
 </div>
 """, unsafe_allow_html=True)
-
-policy_cols = st.columns([1,1,6])
-with policy_cols[0]:
-    with st.popover("개인정보처리방침"):
-        st.write("입력한 URL, 텍스트, 업로드 파일은 광고문구 생성을 위한 처리 목적으로만 사용합니다.")
-with policy_cols[1]:
-    with st.popover("서비스 약관"):
-        st.write("생성 결과는 사용자가 최종 검토 후 사용하는 것을 원칙으로 합니다.")
 
 # ---------------------------
 # Buttons
@@ -504,7 +515,7 @@ if st.session_state.loaded_notice:
 st.markdown("<hr class='misharp-divider'>", unsafe_allow_html=True)
 
 # ---------------------------
-# Input area
+# Input
 # ---------------------------
 left, right = st.columns([1.05, 0.95], gap="large")
 with left:
@@ -530,14 +541,14 @@ with r1:
     st.checkbox("SMS 문자", key=ui_key("sms"))
     st.checkbox("앱푸시", key=ui_key("app_push"))
 with r2:
-    st.checkbox("인스타 릴스 피드", key=ui_key("insta_reels"))
-    st.checkbox("틱톡 피드", key=ui_key("tiktok"))
-with r3:
-    st.checkbox("유튜브 숏츠 피드", key=ui_key("youtube_shorts"))
-    st.checkbox("REVIEW", key=ui_key("review"))
-with r4:
     st.checkbox("동영상 원고", key=ui_key("video_script"))
+    st.checkbox("인스타 릴스 피드", key=ui_key("insta_reels"))
+with r3:
+    st.checkbox("틱톡 피드", key=ui_key("tiktok"))
+    st.checkbox("유튜브 숏츠 피드", key=ui_key("youtube_shorts"))
+with r4:
     st.checkbox("카카오스타일", key=ui_key("kakaostyle"))
+    st.checkbox("REVIEW", key=ui_key("review"))
 
 sms_col, _ = st.columns([0.28, 0.72])
 with sms_col:
@@ -557,10 +568,11 @@ if st.button("문구 생성", use_container_width=True):
         st.warning("출력 채널을 하나 이상 선택해주세요.")
     else:
         try:
+            outputs = {}
             with st.spinner("문구를 생성하고 있습니다..."):
-                raw = call_gpt(build_prompt(payload))
-                cooked = enforce_sections(raw, payload["selected_channels"])
-            st.session_state.result = cooked
+                for ch in payload["selected_channels"]:
+                    outputs[ch] = call_gpt(prompt_for_channel(ch, payload))
+                st.session_state.result = build_final_output(outputs, payload)
         except Exception as e:
             st.error(f"생성 중 오류가 발생했습니다: {e}")
 
@@ -578,4 +590,14 @@ st.download_button(
     use_container_width=False,
 )
 
+# ---------------------------
+# Footer
+# ---------------------------
 st.markdown('<div class="misharp-footer">copyright MISHARP COMPANY by MIYAWA. 2026. All rights reservde.</div>', unsafe_allow_html=True)
+footer_cols = st.columns([4,1,1,4])
+with footer_cols[1]:
+    with st.popover("개인정보처리방침"):
+        st.write("입력한 URL, 텍스트, 업로드 파일은 광고문구 생성을 위한 처리 목적으로만 사용합니다.")
+with footer_cols[2]:
+    with st.popover("서비스약관"):
+        st.write("생성 결과는 사용자가 최종 검토 후 사용하는 것을 원칙으로 합니다.")
