@@ -8,7 +8,7 @@ import streamlit as st
 from openai import OpenAI
 
 st.set_page_config(
-    page_title="MISHARP 광고문구 자동생성기",
+    page_title="MISHARP Marketing OS",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -509,7 +509,7 @@ def build_final_output(channel_outputs: dict, data: dict) -> str:
 # ---------------------------
 st.markdown("""
 <div class="misharp-header">
-  <h1>MISHARP 광고문구 자동생성기</h1>
+  <h1>MISHARP Marketing OS</h1>
   <p>온라인 셀러를 위한 SNS 매체별 최적화 광고문구 자동 생성기</p>
 </div>
 """, unsafe_allow_html=True)
