@@ -192,6 +192,60 @@ hr.misharp-divider{
 .footer-fixed a:hover{
   text-decoration:underline;
 }
+
+/* Button text/background forced */
+a[data-testid="stLinkButton"],
+a[data-testid="stLinkButton"]:link,
+a[data-testid="stLinkButton"]:visited,
+a[data-testid="stLinkButton"]:hover,
+a[data-testid="stLinkButton"]:active,
+a[data-testid="stLinkButton"]:focus{
+  background:rgba(10,18,32,.72) !important;
+  background-color:rgba(10,18,32,.72) !important;
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  border:1px solid #314156 !important;
+  box-shadow:none !important;
+  opacity:1 !important;
+}
+a[data-testid="stLinkButton"] *,
+a[data-testid="stLinkButton"]:link *,
+a[data-testid="stLinkButton"]:visited *,
+a[data-testid="stLinkButton"]:hover *,
+a[data-testid="stLinkButton"]:active *,
+a[data-testid="stLinkButton"]:focus *{
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  fill:#ffffff !important;
+  opacity:1 !important;
+  filter:none !important;
+}
+
+div[data-testid="stPopover"] > button,
+div[data-testid="stPopover"] > button:hover,
+div[data-testid="stPopover"] > button:active,
+div[data-testid="stPopover"] > button:focus{
+  background:rgba(10,18,32,.72) !important;
+  background-color:rgba(10,18,32,.72) !important;
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  border:1px solid #314156 !important;
+  box-shadow:none !important;
+  opacity:1 !important;
+}
+div[data-testid="stPopover"] > button *{
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  fill:#ffffff !important;
+  opacity:1 !important;
+  filter:none !important;
+}
+
+/* Prevent browser/streamlit visited-style look */
+a[data-testid="stLinkButton"]{
+  text-decoration:none !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
