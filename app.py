@@ -4,6 +4,8 @@ import os
 import re
 from datetime import datetime
 
+import requests
+from bs4 import BeautifulSoup
 import streamlit as st
 from openai import OpenAI
 
@@ -225,21 +227,99 @@ def current_payload():
         "media_names": media_names,
     }
 
+
+def fetch_product_page_context(url: str) -> str:
+    url = (url or "").strip()
+    if not url.startswith("http"):
+        return ""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"}
+        res = requests.get(url, headers=headers, timeout=12)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "html.parser")
+        parts = []
+        og = soup.find("meta", attrs={"property": "og:title"})
+        if og and og.get("content"):
+            parts.append(f"상품명/페이지 제목: {og.get('content').strip()}")
+        for tag in soup.find_all(["h2","h3","strong","p","li"]):
+            txt = tag.get_text(" ", strip=True)
+            if not txt:
+                continue
+            if any(k in txt for k in ["[상품 포인트]", "[이 상품을 초이스한 이유입니다.]", "[원단", "[체형", "[이렇게 입는 날이 많아집니다]", "소재 :", "사이즈 TIP", "실측 사이즈"]):
+                parts.append(txt)
+            if len(parts) >= 18:
+                break
+        dedup=[]
+        seen=set()
+        for p in parts:
+            if p not in seen:
+                dedup.append(p); seen.add(p)
+        return "\n".join(dedup[:18])
+    except Exception:
+        return ""
+
+def compose_grounded_source(data: dict) -> str:
+    sections = []
+    entered = (data.get("product_content","") or "").strip()
+    if entered:
+        sections.append("[사용자 입력 상품/이벤트 내용]\n" + entered)
+    page_ctx = fetch_product_page_context(data.get("product_url",""))
+    if page_ctx:
+        sections.append("[상품 URL에서 추출한 참고 정보]\n" + page_ctx)
+    extra = (data.get("event_content","") or "").strip()
+    if extra:
+        sections.append("[이벤트 추가 정보]\n" + extra)
+    return "\n\n".join(sections).strip()
+
+def detect_primary_product_label(data: dict) -> str:
+    source = compose_grounded_source(data)
+    for line in source.splitlines():
+        if line.startswith("상품명/페이지 제목:"):
+            return line.split(":",1)[1].strip()
+    return ""
+
+def sanitize_output_against_source(text: str, data: dict) -> str:
+    source = compose_grounded_source(data)
+    if not source:
+        return text
+    if "셔츠" in source or "블라우스" in source:
+        swaps = {
+            "슬림핏 레이어드 티셔츠":"체크 셔츠",
+            "슬림핏 레깅스":"체크 셔츠",
+            "체형커버 원피스":"체크 셔츠",
+            "세미부츠컷 팬츠":"체크 셔츠",
+            "슬림핏 팬츠":"체크 셔츠",
+            "원피스":"셔츠",
+            "레깅스":"셔츠",
+            "팬츠":"셔츠",
+            "티셔츠":"셔츠",
+        }
+        for a,b in swaps.items():
+            text = text.replace(a,b)
+    label = detect_primary_product_label(data)
+    if label:
+        text = text.replace("[상품명]", label)
+    return text
+
 def base_context(data: dict) -> str:
     media_note = ", ".join(data.get("media_names", [])) if data.get("media_names") else "없음"
+    grounded = compose_grounded_source(data)
     return f"""
 [입력 정보]
 상품 URL:
 {data.get("product_url","")}
 
-상품, 이벤트 주요 내용:
-{data.get("product_content","")}
-
-이벤트 추가 정보:
-{data.get("event_content","")}
+상품 근거 정보:
+{grounded}
 
 업로드 파일명 참고:
 {media_note}
+
+[절대 규칙]
+- 상품명, 상품군, 카테고리를 절대 바꾸지 말 것
+- URL/입력 정보에 없는 다른 상품군으로 바꾸지 말 것
+- 셔츠를 티셔츠/레깅스/원피스/팬츠로 바꾸면 안 됨
+- 근거가 부족하면 오답 추측 대신 "이 상품", "이 아이템"처럼 보수적으로 표현
 """
 
 def prompt_for_channel(channel: str, data: dict) -> str:
@@ -251,6 +331,10 @@ def prompt_for_channel(channel: str, data: dict) -> str:
 당신은 미샵 SMS 카피라이터입니다. 모든 출력은 한국어로만 작성하세요.
 
 {base}
+[추가 규칙]
+- 위 근거 정보의 상품명/상품군을 유지
+- 다른 상품 종류로 바꾸지 말 것
+
 
 [출력 형식]
 단문이면 시안 3개만 출력.
@@ -273,6 +357,10 @@ def prompt_for_channel(channel: str, data: dict) -> str:
 모든 출력은 한국어로만 작성하세요.
 
 {base}
+[추가 규칙]
+- 위 근거 정보의 상품명/상품군을 유지
+- 다른 상품 종류로 바꾸지 말 것
+
 
 [공통 작성 원칙]
 - 할인율을 첫 문장에 바로 노출하지 말 것
@@ -397,6 +485,7 @@ def prompt_for_channel(channel: str, data: dict) -> str:
     if channel == "kakaostyle":
         return f"""
 카카오스타일 미샵계정 피드 원고 작성
+- 상품군 오인 금지. 셔츠면 셔츠, 팬츠면 팬츠, 원피스면 원피스로 정확히 유지
 -최상단 : 해당 상품 홍보를 위한 후킹성 헤드라인 작성
 -헤드라인은 검색형 키워드 + 공감형 문장 조합으로 작성
 -본내용 : 상품명 적고, 한줄 내려서 상품 상세설명 150자 이내 뉴스형식으로 요약
@@ -420,6 +509,7 @@ def prompt_for_channel(channel: str, data: dict) -> str:
     if channel == "review":
         return f"""
 제시한 설명의 미샵 여성의류 상품에 대해
+반드시 같은 상품군을 유지해서 작성하고, 상품군 오인 금지
 고객 구매를 도와줄 수 있는 생활 밀착형, 공감형 상품 사용 후기 작성하되
 아래 지침대로 작성해줘
 
@@ -532,6 +622,7 @@ def build_final_output(channel_outputs: dict, data: dict) -> str:
             url = data.get("product_url", "").strip()
             if url and "상품 바로가기 ▼" in body and url not in body:
                 body = body.replace("상품 바로가기 ▼", f"상품 바로가기 ▼\n{url}", 1)
+        body = sanitize_output_against_source(body, data)
         parts.append(f"==============================\n{label}\n==============================\n{body}")
     return "\n\n".join(parts)
 
