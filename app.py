@@ -87,10 +87,50 @@ div[data-testid="stPopover"] > button{
   border-radius:16px !important;
   border:1px solid #314156 !important;
   background:rgba(10,18,32,.72) !important;
-  color:#fff !important;
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
   font-weight:800 !important;
   padding:0 16px !important;
   box-sizing:border-box !important;
+  opacity:1 !important;
+}
+.stButton > button:hover,
+.stDownloadButton > button:hover,
+a[data-testid="stLinkButton"]:hover,
+div[data-testid="stPopover"] > button:hover{
+  background:rgba(10,18,32,.72) !important;
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  border:1px solid #314156 !important;
+  opacity:1 !important;
+  filter:none !important;
+}
+.stButton > button:focus,
+.stDownloadButton > button:focus,
+a[data-testid="stLinkButton"]:focus,
+div[data-testid="stPopover"] > button:focus,
+.stButton > button:active,
+.stDownloadButton > button:active,
+a[data-testid="stLinkButton"]:active,
+div[data-testid="stPopover"] > button:active{
+  background:rgba(10,18,32,.72) !important;
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  border:1px solid #314156 !important;
+  box-shadow:none !important;
+  opacity:1 !important;
+}
+.stButton > button p,
+.stDownloadButton > button p,
+a[data-testid="stLinkButton"] p,
+div[data-testid="stPopover"] > button p,
+.stButton > button span,
+.stDownloadButton > button span,
+a[data-testid="stLinkButton"] span,
+div[data-testid="stPopover"] > button span{
+  color:#ffffff !important;
+  -webkit-text-fill-color:#ffffff !important;
+  opacity:1 !important;
 }
 div[data-testid="stPopover"]{
   width:100% !important;
